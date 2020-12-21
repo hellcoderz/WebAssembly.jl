@@ -109,7 +109,7 @@ end
 struct Func
   name::Symbol
   params::Vector{WType}
-  returns::Vector{WType}
+  result::Vector{WType}
   locals::Vector{WType}
   body::Block
 end
@@ -149,9 +149,10 @@ end
 struct Import
   mod::Symbol
   name::Symbol
+  as::Symbol
   typ::Symbol   # :func, :table, :memory, :global
   params::Vector{WType}
-  returntype::WType
+  result::Vector{WType}
 end
 
 struct Export
@@ -174,7 +175,13 @@ struct Module
   exports::Vector{Export}
 end
 
-func(m::Module, name) = m.funcs[findfirst(f -> f.name == name, m.funcs)]
+function func(m::Module, name)
+  i = findfirst(f -> f.name == name, m.funcs)
+  i == nothing || return m.funcs[i]
+  i = findfirst(f -> f.as == name, m.imports)
+  i == nothing || return m.imports[i]
+  error("Function $name not found.")
+end
 
 Module(; types = [], funcs = [], tables = [], mems = [], globals = [], elem = [], data = [], start = Ref(0), imports = [], exports = []) =
   Module(types, funcs, tables, mems, globals, elem, data, start, imports, exports)
@@ -249,12 +256,16 @@ end
 
 function printwasm(io, x::Import, level)
   print(io, "\n", "  "^(level))
-  print(io, "(import \"$(x.mod)\" \"$(x.name)\" ($(x.typ) \$$(x.mod)_$(x.name)")
+  print(io, "(import \"$(x.mod)\" \"$(x.name)\" ($(x.typ) \$$(x.as)")
   if x.typ == :func && length(x.params) > 0
     print(io, " (param")
     foreach(p -> print(io, " $p"), x.params)
     print(io, ")")
-    print(io, " (result ", x.returntype, ")")
+  end
+  if x.typ == :func && length(x.result) > 0
+    print(io, " (result")
+    foreach(p -> print(io, " $p"), x.result)
+    print(io, ")")
   end
   print(io, "))")
 end
@@ -282,7 +293,7 @@ function printwasm(io::IO, f::Func, level)
   print(io, "\n", "  "^(level))
   print(io, "(func \$$(f.name)")
   printvars(io, "param", f.params)
-  printvars(io, "result", f.returns)
+  printvars(io, "result", f.result)
   !isempty(f.locals) && print(io, "\n", "  "^level, " ")
   printvars(io, "local", f.locals)
   printwasm_(io, f.body.body, level + 1)
